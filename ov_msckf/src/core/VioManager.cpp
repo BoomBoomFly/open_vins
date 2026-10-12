@@ -522,7 +522,20 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // NOTE: this should only really be used if you want to track a lot of features, or have limited computational resources
   if ((int)featsup_MSCKF.size() > state->_options.max_msckf_in_update)
     featsup_MSCKF.erase(featsup_MSCKF.begin(), featsup_MSCKF.end() - state->_options.max_msckf_in_update);
-  updaterMSCKF->update(state, featsup_MSCKF);
+  // Updaters remove rejected features; only a completed EKF update renews visual health.
+  auto record_visual_update = [&](const std::vector<std::shared_ptr<Feature>> &features) {
+    double latest = last_visual_update_imu_time.load();
+    const double offset = state->_calib_dt_CAMtoIMU->value()(0);
+    for (const auto &feature : features) {
+      for (const auto &camera : feature->timestamps) {
+        for (const double stamp : camera.second)
+          latest = std::max(latest, stamp + offset);
+      }
+    }
+    last_visual_update_imu_time = latest;
+  };
+  if (updaterMSCKF->update(state, featsup_MSCKF))
+    record_visual_update(featsup_MSCKF);
   propagator->invalidate_cache();
   rT4 = boost::posix_time::microsec_clock::local_time();
 
@@ -538,7 +551,8 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
     feats_slam_UPDATE.erase(feats_slam_UPDATE.begin(),
                             feats_slam_UPDATE.begin() + std::min(state->_options.max_slam_in_update, (int)feats_slam_UPDATE.size()));
     // Do the update
-    updaterSLAM->update(state, featsup_TEMP);
+    if (updaterSLAM->update(state, featsup_TEMP))
+      record_visual_update(featsup_TEMP);
     feats_slam_UPDATE_TEMP.insert(feats_slam_UPDATE_TEMP.end(), featsup_TEMP.begin(), featsup_TEMP.end());
     propagator->invalidate_cache();
   }

@@ -9,6 +9,7 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(ov_core REQUIRED)
@@ -43,6 +44,7 @@ list(APPEND ament_libraries
         geometry_msgs
         sensor_msgs
         nav_msgs
+        diagnostic_msgs
         cv_bridge
         image_transport
         ov_core
@@ -113,4 +115,11 @@ install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)
 install(DIRECTORY ../config/ DESTINATION share/${PROJECT_NAME}/config/)
 
 # finally define this as the package
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(fast_propagation_test test/fast_propagation_test.cpp)
+    ament_target_dependencies(fast_propagation_test ${ament_libraries})
+    target_link_libraries(fast_propagation_test ov_msckf_lib ${thirdparty_libraries})
+endif()
+
 ament_package()

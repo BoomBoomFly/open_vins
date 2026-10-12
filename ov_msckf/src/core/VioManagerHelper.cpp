@@ -55,6 +55,9 @@ void VioManager::initialize_with_gt(Eigen::Matrix<double, 17, 1> imustate) {
   // Set the state time
   state->_timestamp = imustate(0, 0);
   startup_time = imustate(0, 0);
+  ++init_generation;
+  last_visual_update_imu_time = -1.0;
+  propagator->invalidate_cache();
   is_initialized_vio = true;
 
   // Cleanup any features older then the initialization time
@@ -116,6 +119,9 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
       // Set the state time
       state->_timestamp = timestamp;
       startup_time = timestamp;
+      ++init_generation;
+      last_visual_update_imu_time = -1.0;
+      propagator->invalidate_cache();
 
       // Cleanup any features older than the initialization time
       // Also increase the number of features to the desired amount during estimation

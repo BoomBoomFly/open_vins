@@ -46,6 +46,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <atomic>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -123,6 +124,8 @@ protected:
   /// Publish the current state
   void publish_state();
 
+  void publish_visual_health();
+
   /// Publish the active tracking image
   void publish_images();
 
@@ -148,6 +151,8 @@ protected:
   image_transport::Publisher it_pub_tracks, it_pub_loop_img_depth, it_pub_loop_img_depth_color;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_poseimu;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odomimu;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr pub_visual_health;
+  std::string visual_session_id;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_pathimu;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_points_msckf, pub_points_slam, pub_points_aruco, pub_points_sim;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_loop_pose, pub_loop_extrinsic;

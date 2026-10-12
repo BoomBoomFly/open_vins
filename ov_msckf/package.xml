@@ -45,10 +45,12 @@
     <depend condition="$ROS_VERSION == 2">geometry_msgs</depend>
     <depend condition="$ROS_VERSION == 2">sensor_msgs</depend>
     <depend condition="$ROS_VERSION == 2">nav_msgs</depend>
+    <depend condition="$ROS_VERSION == 2">diagnostic_msgs</depend>
     <depend condition="$ROS_VERSION == 2">cv_bridge</depend>
     <depend condition="$ROS_VERSION == 2">image_transport</depend>
     <depend condition="$ROS_VERSION == 2">ov_core</depend>
     <depend condition="$ROS_VERSION == 2">ov_init</depend>
+    <test_depend condition="$ROS_VERSION == 2">ament_cmake_gtest</test_depend>
 
     <!-- System dependencies for both versions -->
     <depend>eigen</depend>

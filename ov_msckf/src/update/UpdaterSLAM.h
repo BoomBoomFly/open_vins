@@ -67,7 +67,8 @@ public:
    * @param state State of the filter
    * @param feature_vec Features that can be used for update
    */
-  void update(std::shared_ptr<State> state, std::vector<std::shared_ptr<ov_core::Feature>> &feature_vec);
+  // Returns true only if an EKF measurement update was performed.
+  bool update(std::shared_ptr<State> state, std::vector<std::shared_ptr<ov_core::Feature>> &feature_vec);
 
   /**
    * @brief Given max track features, this will try to use them to initialize them in the state.

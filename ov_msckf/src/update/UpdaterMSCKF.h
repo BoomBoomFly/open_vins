@@ -64,8 +64,9 @@ public:
    *
    * @param state State of the filter
    * @param feature_vec Features that can be used for update
+   * @return True only if an EKF measurement update was performed
    */
-  void update(std::shared_ptr<State> state, std::vector<std::shared_ptr<ov_core::Feature>> &feature_vec);
+  bool update(std::shared_ptr<State> state, std::vector<std::shared_ptr<ov_core::Feature>> &feature_vec);
 
 protected:
   /// Options used during update

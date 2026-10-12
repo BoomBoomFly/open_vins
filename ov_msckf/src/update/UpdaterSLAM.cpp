@@ -250,11 +250,11 @@ void UpdaterSLAM::delayed_init(std::shared_ptr<State> state, std::vector<std::sh
   }
 }
 
-void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_ptr<Feature>> &feature_vec) {
+bool UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_ptr<Feature>> &feature_vec) {
 
   // Return if no features
   if (feature_vec.empty())
-    return;
+    return false;
 
   // Start timing
   boost::posix_time::ptime rT0, rT1, rT2, rT3;
@@ -458,7 +458,7 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
 
   // Return if we don't have anything and resize our matrices
   if (ct_meas < 1) {
-    return;
+    return false;
   }
   assert(ct_meas <= max_meas_size);
   assert(ct_jacob <= max_hx_size);
@@ -476,6 +476,7 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
   PRINT_ALL("[SLAM-UP]: %.4f seconds to update (%d feats of %d size)\n", (rT3 - rT2).total_microseconds() * 1e-6, (int)feature_vec.size(),
             (int)Hx_big.rows());
   PRINT_ALL("[SLAM-UP]: %.4f seconds total\n", (rT3 - rT1).total_microseconds() * 1e-6);
+  return true;
 }
 
 void UpdaterSLAM::change_anchors(std::shared_ptr<State> state) {

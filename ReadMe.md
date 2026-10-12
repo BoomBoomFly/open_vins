@@ -19,6 +19,19 @@ details on what the system supports.
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - https://pgeneva.com/downloads/papers/Geneva2020ICRA.pdf
 
+## BoomBoomFly integration
+
+This fork keeps the upstream estimator and integrates the UAV ROS 2 fixes directly into source:
+
+* Fast IMU prediction applies the camera-to-IMU time offset only to the cached camera state and rejects non-forward targets.
+* `/ov_msckf/visual_health` reports accepted MSCKF/SLAM observations, initialization generation and process session. Pure propagation and ZUPT do not renew visual health.
+* Stereo and monocular image subscriptions use SensorDataQoS for RealSense stream compatibility.
+* The core packages let the CMake build type control debug information rather than forcing `-g3`.
+
+Regression source is in `ov_msckf/test/fast_propagation_test.cpp`. Camera/FCU calibration and the Orange Pi 4GB runtime profile are owned by [BoomBoomFly/uav_ws](https://github.com/BoomBoomFly/uav_ws/tree/main/config/openvins/d435i_px4); they are not replaced by example dataset calibrations.
+The companion [uav_vio_bridge](https://github.com/BoomBoomFly/uav_vio_bridge) adapts IMU odometry for MAVROS ODOMETRY and defaults to disabled output.
+No separate workspace patch needs to be applied. Full OpenVINS compilation, regression execution and hardware/PX4 fusion remain unverified for this integrated revision.
+
 ## News / Events
 
 * **May 11, 2023** - Inertial intrinsic support released as part of v2.7 along with a few bug fixes and improvements to stereo KLT tracking. Please check out the [release page](https://github.com/rpng/open_vins/releases/tag/v2.7) for details.

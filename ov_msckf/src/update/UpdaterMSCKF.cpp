@@ -55,11 +55,11 @@ UpdaterMSCKF::UpdaterMSCKF(UpdaterOptions &options, ov_core::FeatureInitializerO
   }
 }
 
-void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_ptr<Feature>> &feature_vec) {
+bool UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_ptr<Feature>> &feature_vec) {
 
   // Return if no features
   if (feature_vec.empty())
-    return;
+    return false;
 
   // Start timing
   boost::posix_time::ptime rT0, rT1, rT2, rT3, rT4, rT5;
@@ -264,7 +264,7 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
 
   // Return if we don't have anything and resize our matrices
   if (ct_meas < 1) {
-    return;
+    return false;
   }
   assert(ct_meas <= max_meas_size);
   assert(ct_jacob <= max_hx_size);
@@ -274,7 +274,7 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
   // 5. Perform measurement compression
   UpdaterHelper::measurement_compress_inplace(Hx_big, res_big);
   if (Hx_big.rows() < 1) {
-    return;
+    return false;
   }
   rT4 = boost::posix_time::microsec_clock::local_time();
 
@@ -292,4 +292,5 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
   PRINT_ALL("[MSCKF-UP]: %.4f seconds compress system\n", (rT4 - rT3).total_microseconds() * 1e-6);
   PRINT_ALL("[MSCKF-UP]: %.4f seconds update state (%d size)\n", (rT5 - rT4).total_microseconds() * 1e-6, (int)res_big.rows());
   PRINT_ALL("[MSCKF-UP]: %.4f seconds total\n", (rT5 - rT1).total_microseconds() * 1e-6);
+  return true;
 }

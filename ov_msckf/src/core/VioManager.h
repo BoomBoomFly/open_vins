@@ -25,6 +25,7 @@
 #include <Eigen/StdVector>
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <boost/filesystem.hpp>
 #include <fstream>
 #include <memory>
@@ -100,6 +101,12 @@ public:
 
   /// Timestamp that the system was initialized at
   double initialized_time() { return startup_time; }
+
+  /// Generation changes on every initialization, including ground-truth initialization.
+  uint64_t initialization_generation() const { return init_generation.load(); }
+
+  /// Latest observation actually accepted by MSCKF/SLAM, expressed in the IMU clock.
+  double last_visual_update_time() const { return last_visual_update_imu_time.load(); }
 
   /// Accessor for current system parameters
   VioManagerOptions get_params() { return params; }
@@ -221,6 +228,9 @@ protected:
 
   // Startup time of the filter
   double startup_time = -1;
+
+  std::atomic<uint64_t> init_generation{0};
+  std::atomic<double> last_visual_update_imu_time{-1.0};
 
   // Threads and their atomics
   std::atomic<bool> thread_init_running, thread_init_success;

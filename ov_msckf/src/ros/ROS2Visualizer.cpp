@@ -21,6 +21,8 @@
 
 #include "ROS2Visualizer.h"
 
+#include <chrono>
+
 #include "core/VioManager.h"
 #include "ros/ROSVisualizerHelper.h"
 #include "sim/Simulator.h"
@@ -49,6 +51,8 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
   PRINT_DEBUG("Publishing: %s\n", pub_poseimu->get_topic_name());
   pub_odomimu = node->create_publisher<nav_msgs::msg::Odometry>("odomimu", 2);
   PRINT_DEBUG("Publishing: %s\n", pub_odomimu->get_topic_name());
+  pub_visual_health = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("visual_health", 2);
+  visual_session_id = std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
   pub_pathimu = node->create_publisher<nav_msgs::msg::Path>("pathimu", 2);
   PRINT_DEBUG("Publishing: %s\n", pub_pathimu->get_topic_name());
 
@@ -186,8 +190,10 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
     parser->parse_external("relative_config_imucam", "cam" + std::to_string(0), "rostopic", cam_topic0);
     parser->parse_external("relative_config_imucam", "cam" + std::to_string(1), "rostopic", cam_topic1);
     // Create sync filter (they have unique pointers internally, so we have to use move logic here...)
-    auto image_sub0 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic0);
-    auto image_sub1 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic1);
+    // RealSense sensor streams may offer best-effort delivery; both filters must request compatible QoS.
+    const auto image_qos = rclcpp::SensorDataQoS().get_rmw_qos_profile();
+    auto image_sub0 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic0, image_qos);
+    auto image_sub1 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic1, image_qos);
     auto sync = std::make_shared<message_filters::Synchronizer<sync_pol>>(sync_pol(10), *image_sub0, *image_sub1);
     sync->registerCallback(std::bind(&ROS2Visualizer::callback_stereo, this, std::placeholders::_1, std::placeholders::_2, 0, 1));
     // sync->registerCallback([](const sensor_msgs::msg::Image::SharedPtr msg0, const sensor_msgs::msg::Image::SharedPtr msg1)
@@ -208,10 +214,9 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
       _node->get_parameter("topic_camera" + std::to_string(i), cam_topic);
       parser->parse_external("relative_config_imucam", "cam" + std::to_string(i), "rostopic", cam_topic);
       // create subscriber
-      // auto sub = _node->create_subscription<sensor_msgs::msg::Image>(
-      //    cam_topic, rclcpp::SensorDataQoS(), std::bind(&ROS2Visualizer::callback_monocular, this, std::placeholders::_1, i));
       auto sub = _node->create_subscription<sensor_msgs::msg::Image>(
-          cam_topic, 10, [this, i](const sensor_msgs::msg::Image::SharedPtr msg0) { callback_monocular(msg0, i); });
+          cam_topic, rclcpp::SensorDataQoS(),
+          [this, i](const sensor_msgs::msg::Image::SharedPtr msg0) { callback_monocular(msg0, i); });
       subs_cam.push_back(sub);
       PRINT_INFO("subscribing to cam (mono): %s\n", cam_topic.c_str());
     }
@@ -219,6 +224,8 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
 }
 
 void ROS2Visualizer::visualize() {
+
+  publish_visual_health();
 
   // Return if we have already visualized
   if (last_visualization_timestamp == _app->get_state()->_timestamp && _app->initialized())
@@ -433,6 +440,29 @@ void ROS2Visualizer::visualize_final() {
   // Print the total time
   rT2 = boost::posix_time::microsec_clock::local_time();
   PRINT_INFO(REDPURPLE "TIME: %.3f seconds\n\n" RESET, (rT2 - rT1).total_microseconds() * 1e-6);
+}
+
+void ROS2Visualizer::publish_visual_health() {
+  diagnostic_msgs::msg::DiagnosticArray health;
+  health.header.frame_id = "global";
+  const double stamp = _app->last_visual_update_time();
+  if (stamp > 0.0)
+    health.header.stamp = ROSVisualizerHelper::get_time_from_seconds(stamp);
+  diagnostic_msgs::msg::DiagnosticStatus status;
+  status.name = "openvins/visual_fusion";
+  status.hardware_id = visual_session_id;
+  status.level = _app->initialized() && stamp > 0.0 ? status.OK : status.WARN;
+  status.message = status.level == status.OK ? "accepted visual observations" : "waiting for visual fusion";
+  for (const auto &entry : std::vector<std::pair<std::string, std::string>>{
+           {"contract_version", "1"}, {"initialized", _app->initialized() ? "true" : "false"},
+           {"reset_counter", std::to_string(_app->initialization_generation())}}) {
+    diagnostic_msgs::msg::KeyValue value;
+    value.key = entry.first;
+    value.value = entry.second;
+    status.values.push_back(value);
+  }
+  health.status.push_back(status);
+  pub_visual_health->publish(health);
 }
 
 void ROS2Visualizer::callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg) {
