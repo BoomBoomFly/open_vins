@@ -153,15 +153,30 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
 
   // Start thread for the image publishing
   if (_app->get_params().use_multi_threading_pubs) {
-    std::thread thread([&] {
+    image_thread = std::thread([this] {
       rclcpp::Rate loop_rate(20);
-      while (rclcpp::ok()) {
-        publish_images();
-        loop_rate.sleep();
+      try {
+        while (rclcpp::ok() && !stopping) {
+          publish_images();
+          loop_rate.sleep();
+        }
+      } catch (const rclcpp::exceptions::RCLError &) {
+        if (rclcpp::ok())
+          throw;
       }
     });
-    thread.detach();
   }
+}
+
+ROS2Visualizer::~ROS2Visualizer() { stop_threads(); }
+
+void ROS2Visualizer::stop_threads() {
+  stopping = true;
+  if (update_thread.joinable())
+    update_thread.join();
+  if (image_thread.joinable())
+    image_thread.join();
+  _app->wait_for_initialization();
 }
 
 void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> parser) {
@@ -190,7 +205,7 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
     parser->parse_external("relative_config_imucam", "cam" + std::to_string(0), "rostopic", cam_topic0);
     parser->parse_external("relative_config_imucam", "cam" + std::to_string(1), "rostopic", cam_topic1);
     // Create sync filter (they have unique pointers internally, so we have to use move logic here...)
-    // RealSense sensor streams may offer best-effort delivery; both filters must request compatible QoS.
+    // Match RealSense sensor streams without requiring reliable delivery.
     const auto image_qos = rclcpp::SensorDataQoS().get_rmw_qos_profile();
     auto image_sub0 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic0, image_qos);
     auto image_sub1 = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, cam_topic1, image_qos);
@@ -437,6 +452,12 @@ void ROS2Visualizer::visualize_final() {
     PRINT_INFO(REDPURPLE "NEES: %.3f (m) position\n\n" RESET, summed_nees_pos / summed_number);
   }
 
+  // A never-initialized estimator has no valid start time.
+  if (!start_time_set) {
+    PRINT_INFO("TIME: estimator not initialized\n");
+    return;
+  }
+
   // Print the total time
   rT2 = boost::posix_time::microsec_clock::local_time();
   PRINT_INFO(REDPURPLE "TIME: %.3f seconds\n\n" RESET, (rT2 - rT1).total_microseconds() * 1e-6);
@@ -467,6 +488,9 @@ void ROS2Visualizer::publish_visual_health() {
 
 void ROS2Visualizer::callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg) {
 
+  if (stopping || !rclcpp::ok())
+    return;
+
   // convert into correct format
   ov_core::ImuData message;
   message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
@@ -482,46 +506,52 @@ void ROS2Visualizer::callback_inertial(const sensor_msgs::msg::Imu::SharedPtr ms
   // The visualization of the state, images, and features will be synchronous with the update!
   if (thread_update_running)
     return;
+  if (update_thread.joinable())
+    update_thread.join();
   thread_update_running = true;
-  std::thread thread([&] {
-    // Lock on the queue (prevents new images from appending)
-    std::lock_guard<std::mutex> lck(camera_queue_mtx);
+  // message is local to this callback and must outlive it when processing asynchronously.
+  update_thread = std::thread([this, message] {
+    try {
+      // Lock on the queue (prevents new images from appending)
+      std::lock_guard<std::mutex> lck(camera_queue_mtx);
 
-    // Count how many unique image streams
-    std::map<int, bool> unique_cam_ids;
-    for (const auto &cam_msg : camera_queue) {
-      unique_cam_ids[cam_msg.sensor_ids.at(0)] = true;
-    }
-
-    // If we do not have enough unique cameras then we need to wait
-    // We should wait till we have one of each camera to ensure we propagate in the correct order
-    auto params = _app->get_params();
-    size_t num_unique_cameras = (params.state_options.num_cameras == 2) ? 1 : params.state_options.num_cameras;
-    if (unique_cam_ids.size() == num_unique_cameras) {
-
-      // Loop through our queue and see if we are able to process any of our camera measurements
-      // We are able to process if we have at least one IMU measurement greater than the camera time
-      double timestamp_imu_inC = message.timestamp - _app->get_state()->_calib_dt_CAMtoIMU->value()(0);
-      while (!camera_queue.empty() && camera_queue.at(0).timestamp < timestamp_imu_inC) {
-        auto rT0_1 = boost::posix_time::microsec_clock::local_time();
-        double update_dt = 100.0 * (timestamp_imu_inC - camera_queue.at(0).timestamp);
-        _app->feed_measurement_camera(camera_queue.at(0));
-        visualize();
-        camera_queue.pop_front();
-        auto rT0_2 = boost::posix_time::microsec_clock::local_time();
-        double time_total = (rT0_2 - rT0_1).total_microseconds() * 1e-6;
-        PRINT_INFO(BLUE "[TIME]: %.4f seconds total (%.1f hz, %.2f ms behind)\n" RESET, time_total, 1.0 / time_total, update_dt);
+      // Count how many unique image streams
+      std::map<int, bool> unique_cam_ids;
+      for (const auto &cam_msg : camera_queue) {
+        unique_cam_ids[cam_msg.sensor_ids.at(0)] = true;
       }
+
+      // If we do not have enough unique cameras then we need to wait
+      // We should wait till we have one of each camera to ensure we propagate in the correct order
+      auto params = _app->get_params();
+      size_t num_unique_cameras = (params.state_options.num_cameras == 2) ? 1 : params.state_options.num_cameras;
+      if (unique_cam_ids.size() == num_unique_cameras) {
+
+        // Loop through our queue and see if we are able to process any of our camera measurements
+        // We are able to process if we have at least one IMU measurement greater than the camera time
+        double timestamp_imu_inC = message.timestamp - _app->get_state()->_calib_dt_CAMtoIMU->value()(0);
+        while (rclcpp::ok() && !stopping && !camera_queue.empty() && camera_queue.at(0).timestamp < timestamp_imu_inC) {
+          auto rT0_1 = boost::posix_time::microsec_clock::local_time();
+          double update_dt = 1000.0 * (timestamp_imu_inC - camera_queue.at(0).timestamp);
+          _app->feed_measurement_camera(camera_queue.at(0));
+          visualize();
+          camera_queue.pop_front();
+          auto rT0_2 = boost::posix_time::microsec_clock::local_time();
+          double time_total = (rT0_2 - rT0_1).total_microseconds() * 1e-6;
+          PRINT_INFO(BLUE "[TIME]: %.4f seconds total (%.1f hz, %.2f ms behind)\n" RESET, time_total, 1.0 / time_total, update_dt);
+        }
+      }
+    } catch (const rclcpp::exceptions::RCLError &) {
+      if (rclcpp::ok())
+        throw;
     }
     thread_update_running = false;
   });
 
   // If we are single threaded, then run single threaded
-  // Otherwise detach this thread so it runs in the background!
+  // Keep ownership so shutdown waits before destroying publishers and state.
   if (!_app->get_params().use_multi_threading_subs) {
-    thread.join();
-  } else {
-    thread.detach();
+    update_thread.join();
   }
 }
 

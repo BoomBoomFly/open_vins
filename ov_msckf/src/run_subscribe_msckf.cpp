@@ -110,6 +110,7 @@ int main(int argc, char **argv) {
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);
   executor.spin();
+  viz->stop_threads();
 #endif
 
   // Final visualization
@@ -117,6 +118,11 @@ int main(int argc, char **argv) {
 #if ROS_AVAILABLE == 1
   ros::shutdown();
 #elif ROS_AVAILABLE == 2
+  // Destroy ROS publishers while the node/context are still owned by main.
+  viz.reset();
+  sys.reset();
+  executor.remove_node(node);
+  node.reset();
   rclcpp::shutdown();
 #endif
 

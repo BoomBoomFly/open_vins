@@ -25,6 +25,7 @@
 #include <Eigen/StdVector>
 #include <algorithm>
 #include <atomic>
+#include <thread>
 #include <cstdint>
 #include <boost/filesystem.hpp>
 #include <fstream>
@@ -68,6 +69,13 @@ public:
    * @param params_ Parameters loaded from either ROS or CMDLINE
    */
   VioManager(VioManagerOptions &params_);
+
+  ~VioManager() { wait_for_initialization(); }
+
+  void wait_for_initialization() {
+    if (init_thread.joinable())
+      init_thread.join();
+  }
 
   /**
    * @brief Feed function for inertial data
@@ -234,6 +242,7 @@ protected:
 
   // Threads and their atomics
   std::atomic<bool> thread_init_running, thread_init_success;
+  std::thread init_thread;
 
   // If we did a zero velocity update
   bool did_zupt_update = false;

@@ -27,6 +27,8 @@ This fork keeps the upstream estimator and integrates the UAV ROS 2 fixes direct
 * `/ov_msckf/visual_health` reports accepted MSCKF/SLAM observations, initialization generation and process session. Pure propagation and ZUPT do not renew visual health.
 * Stereo and monocular image subscriptions use SensorDataQoS for RealSense stream compatibility.
 * The core packages let the CMake build type control debug information rather than forcing `-g3`.
+* ROS 2 update, image and initialization threads are owned and joined before estimator destruction; the update worker captures IMU data by value.
+* Regression tests pass named `StateOptions` objects to the constructor that requires a non-const reference.
 
 Regression source is in `ov_msckf/test/fast_propagation_test.cpp`. Camera/FCU calibration and the Orange Pi 4GB runtime profile are owned by [BoomBoomFly/uav_ws](https://github.com/BoomBoomFly/uav_ws/tree/main/config/openvins/d435i_px4); they are not replaced by example dataset calibrations.
 The companion [uav_vio_bridge](https://github.com/BoomBoomFly/uav_vio_bridge) adapts IMU odometry for MAVROS ODOMETRY and defaults to disabled output.

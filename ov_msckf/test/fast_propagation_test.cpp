@@ -10,7 +10,8 @@
 namespace {
 TEST(FastPropagation, NonzeroOffsetsUseImuTargetAcrossCacheRebuilds) {
   for (const double offset : {-0.0052691525299192535, 0.02, 0.0}) {
-    auto state = std::make_shared<ov_msckf::State>(ov_msckf::StateOptions{});
+    ov_msckf::StateOptions state_options;
+    auto state = std::make_shared<ov_msckf::State>(state_options);
     state->_timestamp = 10.0;
     Eigen::Matrix<double, 1, 1> time_offset;
     time_offset << offset;
@@ -49,7 +50,8 @@ TEST(FastPropagation, NonzeroOffsetsUseImuTargetAcrossCacheRebuilds) {
 }
 
 TEST(VisualFusion, EmptyFeatureUpdatesDoNotReportFusion) {
-  auto state = std::make_shared<ov_msckf::State>(ov_msckf::StateOptions{});
+  ov_msckf::StateOptions state_options;
+  auto state = std::make_shared<ov_msckf::State>(state_options);
   ov_msckf::UpdaterOptions options;
   ov_core::FeatureInitializerOptions initialization;
   ov_msckf::UpdaterMSCKF msckf(options, initialization);
