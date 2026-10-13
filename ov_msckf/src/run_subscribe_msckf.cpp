@@ -81,8 +81,8 @@ int main(int argc, char **argv) {
 
   // Create our VIO system
   VioManagerOptions params;
-  params.print_and_load(parser);
   params.use_multi_threading_subs = true;
+  params.print_and_load(parser);
   sys = std::make_shared<VioManager>(params);
 #if ROS_AVAILABLE == 1
   viz = std::make_shared<ROS1Visualizer>(nh, sys);

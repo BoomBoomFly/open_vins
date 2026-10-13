@@ -82,6 +82,9 @@ struct VioManagerOptions {
   /// If we should try to use zero velocity update
   bool try_zupt = false;
 
+  /// Require motion after the stationary initialization window when ZUPT is disabled.
+  bool init_wait_for_jerk = true;
+
   /// Max velocity we will consider to try to do a zupt (i.e. if above this, don't do zupt)
   double zupt_max_velocity = 1.0;
 
@@ -113,6 +116,7 @@ struct VioManagerOptions {
     if (parser != nullptr) {
       parser->parse_config("dt_slam_delay", dt_slam_delay);
       parser->parse_config("try_zupt", try_zupt);
+      parser->parse_config("init_wait_for_jerk", init_wait_for_jerk, false);
       parser->parse_config("zupt_max_velocity", zupt_max_velocity);
       parser->parse_config("zupt_noise_multiplier", zupt_noise_multiplier);
       parser->parse_config("zupt_max_disparity", zupt_max_disparity);
@@ -122,6 +126,7 @@ struct VioManagerOptions {
     }
     PRINT_DEBUG("  - dt_slam_delay: %.1f\n", dt_slam_delay);
     PRINT_DEBUG("  - zero_velocity_update: %d\n", try_zupt);
+    PRINT_DEBUG("  - init_wait_for_jerk: %d\n", init_wait_for_jerk);
     PRINT_DEBUG("  - zupt_max_velocity: %.2f\n", zupt_max_velocity);
     PRINT_DEBUG("  - zupt_noise_multiplier: %.2f\n", zupt_noise_multiplier);
     PRINT_DEBUG("  - zupt_max_disparity: %.4f\n", zupt_max_disparity);
