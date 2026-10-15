@@ -16,6 +16,10 @@ launch_args = [
         name="rviz_enable", default_value="false", description="enable rviz node"
     ),
     DeclareLaunchArgument(
+        name="respawn", default_value="false", choices=["true", "false"],
+        description="restart the estimator after exit (2 second delay)",
+    ),
+    DeclareLaunchArgument(
         name="config",
         default_value="euroc_mav",
         description="euroc_mav, tum_vi, rpng_aruco...",
@@ -80,6 +84,8 @@ def launch_setup(context):
         condition=IfCondition(LaunchConfiguration("ov_enable")),
         namespace=LaunchConfiguration("namespace"),
         output='screen',
+        respawn=LaunchConfiguration("respawn"),
+        respawn_delay=2.0,
         parameters=[
             {"verbosity": LaunchConfiguration("verbosity")},
             {"use_stereo": LaunchConfiguration("use_stereo")},

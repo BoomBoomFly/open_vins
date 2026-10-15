@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "state/Propagator.h"
 #include "state/State.h"
 #include "types/IMU.h"
 #include "update/UpdaterMSCKF.h"
 #include "update/UpdaterSLAM.h"
 #include "utils/sensor_data.h"
+#include "ros/ImuInputGuard.h"
 
 namespace {
 TEST(FastPropagation, NonzeroOffsetsUseImuTargetAcrossCacheRebuilds) {
@@ -59,5 +62,53 @@ TEST(VisualFusion, EmptyFeatureUpdatesDoNotReportFusion) {
   std::vector<std::shared_ptr<ov_core::Feature>> features;
   EXPECT_FALSE(msckf.update(state, features));
   EXPECT_FALSE(slam.update(state, features));
+}
+
+TEST(ImuInputGuard, RejectsNonIncreasingSamplesWithoutResettingTheFilterTimeline) {
+  ov_msckf::ImuInputGuard guard;
+  Eigen::Vector3d angular_velocity(0.1, -0.2, 0.3);
+  Eigen::Vector3d linear_acceleration(0.0, 0.0, 9.81);
+  double timestamp = 0.0;
+
+  EXPECT_EQ(guard.accept(1, 250000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::Accepted);
+  EXPECT_DOUBLE_EQ(timestamp, 1.25);
+  EXPECT_EQ(guard.accept(1, 300000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::Accepted);
+  EXPECT_DOUBLE_EQ(timestamp, 1.3);
+  EXPECT_EQ(guard.accept(1, 300000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::DuplicateTimestamp);
+  EXPECT_EQ(guard.accept(1, 200000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::TimestampMovedBackwards);
+  EXPECT_EQ(guard.accept(1, 200000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::TimestampMovedBackwards);
+  EXPECT_EQ(guard.accept(1, 350000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::Accepted);
+  EXPECT_DOUBLE_EQ(timestamp, 1.35);
+}
+
+TEST(ImuInputGuard, RejectsInvalidStampsAndNonfiniteMotionWithoutAdvancingTime) {
+  ov_msckf::ImuInputGuard guard;
+  Eigen::Vector3d angular_velocity = Eigen::Vector3d::Zero();
+  Eigen::Vector3d linear_acceleration(0.0, 0.0, 9.81);
+  double timestamp = 0.0;
+
+  EXPECT_EQ(guard.accept(0, 0U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::InvalidTimestamp);
+  EXPECT_EQ(guard.accept(-1, 0U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::InvalidTimestamp);
+  EXPECT_EQ(guard.accept(1, 1000000000U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::InvalidTimestamp);
+  angular_velocity.x() = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_EQ(guard.accept(1, 0U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::NonfiniteMeasurement);
+  angular_velocity.setZero();
+  linear_acceleration.z() = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(guard.accept(1, 0U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::NonfiniteMeasurement);
+  linear_acceleration.z() = 9.81;
+  EXPECT_EQ(guard.accept(1, 0U, angular_velocity, linear_acceleration, timestamp),
+      ov_msckf::ImuInputStatus::Accepted);
+  EXPECT_DOUBLE_EQ(timestamp, 1.0);
 }
 } // namespace

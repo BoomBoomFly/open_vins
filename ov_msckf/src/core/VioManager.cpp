@@ -171,19 +171,19 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
   if (oldest_time > state->_timestamp) {
     oldest_time = -1;
   }
-  if (!is_initialized_vio) {
+  if (!is_initialized_vio.load(std::memory_order_acquire)) {
     oldest_time = message.timestamp - params.init_options.init_window_time + state->_calib_dt_CAMtoIMU->value()(0) - 0.10;
   }
   propagator->feed_imu(message, oldest_time);
 
   // Push back to our initializer
-  if (!is_initialized_vio) {
+  if (!is_initialized_vio.load(std::memory_order_acquire)) {
     initializer->feed_imu(message, oldest_time);
   }
 
   // Push back to the zero velocity updater if it is enabled
   // No need to push back if we are just doing the zv-update at the begining and we have moved
-  if (is_initialized_vio && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
+  if (is_initialized_vio.load(std::memory_order_acquire) && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
     updaterZUPT->feed_imu(message, oldest_time);
   }
 }
@@ -218,7 +218,7 @@ void VioManager::feed_measurement_simulation(double timestamp, const std::vector
   // Check if we should do zero-velocity, if so update the state with it
   // Note that in the case that we only use in the beginning initialization phase
   // If we have since moved, then we should never try to do a zero velocity update!
-  if (is_initialized_vio && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
+  if (is_initialized_vio.load(std::memory_order_acquire) && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
     // If the same state time, use the previous timestep decision
     if (state->_timestamp != timestamp) {
       did_zupt_update = updaterZUPT->try_update(state, timestamp);
@@ -233,7 +233,7 @@ void VioManager::feed_measurement_simulation(double timestamp, const std::vector
   }
 
   // If we do not have VIO initialization, then return an error
-  if (!is_initialized_vio) {
+  if (!is_initialized_vio.load(std::memory_order_acquire)) {
     PRINT_ERROR(RED "[SIM]: your vio system should already be initialized before simulating features!!!\n" RESET);
     PRINT_ERROR(RED "[SIM]: initialize your system first before calling feed_measurement_simulation()!!!!\n" RESET);
     std::exit(EXIT_FAILURE);
@@ -283,7 +283,7 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   // If the aruco tracker is available, the also pass to it
   // NOTE: binocular tracking for aruco doesn't make sense as we by default have the ids
   // NOTE: thus we just call the stereo tracking if we are doing binocular!
-  if (is_initialized_vio && trackARUCO != nullptr) {
+  if (is_initialized_vio.load(std::memory_order_acquire) && trackARUCO != nullptr) {
     trackARUCO->feed_new_camera(message);
   }
   rT2 = boost::posix_time::microsec_clock::local_time();
@@ -291,7 +291,7 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   // Check if we should do zero-velocity, if so update the state with it
   // Note that in the case that we only use in the beginning initialization phase
   // If we have since moved, then we should never try to do a zero velocity update!
-  if (is_initialized_vio && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
+  if (is_initialized_vio.load(std::memory_order_acquire) && updaterZUPT != nullptr && (!params.zupt_only_at_beginning || !has_moved_since_zupt)) {
     // If the same state time, use the previous timestep decision
     if (state->_timestamp != message.timestamp) {
       did_zupt_update = updaterZUPT->try_update(state, message.timestamp);
@@ -307,9 +307,10 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
 
   // If we do not have VIO initialization, then try to initialize
   // TODO: Or if we are trying to reset the system, then do that here!
-  if (!is_initialized_vio) {
-    is_initialized_vio = try_to_initialize(message);
-    if (!is_initialized_vio) {
+  if (!is_initialized_vio.load(std::memory_order_acquire)) {
+    const bool initialized = try_to_initialize(message);
+    is_initialized_vio.store(initialized, std::memory_order_release);
+    if (!initialized) {
       double time_track = (rT2 - rT1).total_microseconds() * 1e-6;
       PRINT_DEBUG(BLUE "[TIME]: %.4f seconds for tracking\n" RESET, time_track);
       return;
@@ -658,11 +659,12 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   }
 
   // Update our distance traveled
-  if (timelastupdate != -1 && state->_clones_IMU.find(timelastupdate) != state->_clones_IMU.end()) {
-    Eigen::Matrix<double, 3, 1> dx = state->_imu->pos() - state->_clones_IMU.at(timelastupdate)->pos();
+  const double previous_update = timelastupdate.load(std::memory_order_relaxed);
+  if (previous_update != -1 && state->_clones_IMU.find(previous_update) != state->_clones_IMU.end()) {
+    Eigen::Matrix<double, 3, 1> dx = state->_imu->pos() - state->_clones_IMU.at(previous_update)->pos();
     distance += dx.norm();
   }
-  timelastupdate = message.timestamp;
+  timelastupdate.store(message.timestamp, std::memory_order_release);
 
   // Debug, print our current state
   PRINT_INFO("q_GtoI = %.3f,%.3f,%.3f,%.3f | p_IinG = %.3f,%.3f,%.3f | dist = %.2f (meters)\n", state->_imu->quat()(0),

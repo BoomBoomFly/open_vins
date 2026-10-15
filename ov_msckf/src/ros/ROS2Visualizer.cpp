@@ -22,6 +22,7 @@
 #include "ROS2Visualizer.h"
 
 #include <chrono>
+#include <utility>
 
 #include "core/VioManager.h"
 #include "ros/ROSVisualizerHelper.h"
@@ -491,26 +492,36 @@ void ROS2Visualizer::callback_inertial(const sensor_msgs::msg::Imu::SharedPtr ms
   if (stopping || !rclcpp::ok())
     return;
 
-  // convert into correct format
+  Eigen::Vector3d angular_velocity, linear_acceleration;
+  angular_velocity << msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z;
+  linear_acceleration << msg->linear_acceleration.x, msg->linear_acceleration.y,
+      msg->linear_acceleration.z;
+  double timestamp = 0.0;
+  const auto input_status = imu_input_guard_.accept(
+      msg->header.stamp.sec, msg->header.stamp.nanosec,
+      angular_velocity, linear_acceleration, timestamp);
+  if (input_status != ImuInputStatus::Accepted) {
+    RCLCPP_WARN_THROTTLE(
+      _node->get_logger(), *_node->get_clock(), 2000, "%s",
+      imu_input_status_message(input_status));
+    return;
+  }
+
+  // Convert only validated raw sensor values into the estimator's data type.
   ov_core::ImuData message;
-  message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
-  message.wm << msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z;
-  message.am << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
+  message.timestamp = timestamp;
+  message.wm = angular_velocity;
+  message.am = linear_acceleration;
 
   // send it to our VIO system
   _app->feed_measurement_imu(message);
   visualize_odometry(message.timestamp);
 
-  // If the processing queue is currently active / running just return so we can keep getting measurements
-  // Otherwise create a second thread to do our update in an async manor
-  // The visualization of the state, images, and features will be synchronous with the update!
-  if (thread_update_running)
+  // Do not start a second camera update while the asynchronous worker is active.
+  if (thread_update_running.exchange(true))
     return;
-  if (update_thread.joinable())
-    update_thread.join();
-  thread_update_running = true;
-  // message is local to this callback and must outlive it when processing asynchronously.
-  update_thread = std::thread([this, message] {
+
+  auto process_camera_queue = [this, message] {
     try {
       // Lock on the queue (prevents new images from appending)
       std::lock_guard<std::mutex> lck(camera_queue_mtx);
@@ -542,17 +553,27 @@ void ROS2Visualizer::callback_inertial(const sensor_msgs::msg::Imu::SharedPtr ms
         }
       }
     } catch (const rclcpp::exceptions::RCLError &) {
+      thread_update_running = false;
       if (rclcpp::ok())
         throw;
+      return;
+    } catch (...) {
+      thread_update_running = false;
+      throw;
     }
     thread_update_running = false;
-  });
+  };
 
-  // If we are single threaded, then run single threaded
-  // Keep ownership so shutdown waits before destroying publishers and state.
+  // Avoid creating a thread that is immediately joined in the default mode.
   if (!_app->get_params().use_multi_threading_subs) {
-    update_thread.join();
+    process_camera_queue();
+    return;
   }
+
+  // Keep ownership so shutdown waits before destroying publishers and state.
+  if (update_thread.joinable())
+    update_thread.join();
+  update_thread = std::thread(std::move(process_camera_queue));
 }
 
 void ROS2Visualizer::callback_monocular(const sensor_msgs::msg::Image::SharedPtr msg0, int cam_id0) {

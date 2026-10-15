@@ -57,6 +57,8 @@
 #include <boost/filesystem.hpp>
 #include <cv_bridge/cv_bridge.h>
 
+#include "ros/ImuInputGuard.h"
+
 namespace ov_core {
 class YamlParser;
 struct CameraData;
@@ -147,6 +149,9 @@ protected:
 
   /// Core application of the filter system
   std::shared_ptr<VioManager> _app;
+
+  /// Drops invalid, duplicate and out-of-order IMU samples before estimator input.
+  ImuInputGuard imu_input_guard_;
 
   /// Simulator (is nullptr if we are not sim'ing)
   std::shared_ptr<Simulator> _sim;

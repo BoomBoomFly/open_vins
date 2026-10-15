@@ -81,8 +81,22 @@ int main(int argc, char **argv) {
 
   // Create our VIO system
   VioManagerOptions params;
+#if ROS_AVAILABLE == 1
+  // Preserve the ROS 1 default; ROS 2 uses the configured synchronous default.
   params.use_multi_threading_subs = true;
+#endif
   params.print_and_load(parser);
+#if ROS_AVAILABLE == 2
+  // The ROS 2 estimator state is shared by IMU, camera and visualization
+  // callbacks. Keep all three on the executor thread instead of racing a
+  // background camera or image-publishing worker against state updates.
+  if (params.use_multi_threading_subs || params.use_multi_threading_pubs) {
+    PRINT_WARNING(
+      YELLOW "ROS 2 state access is serialized; disabling asynchronous subscriber and image publisher threads\n" RESET);
+  }
+  params.use_multi_threading_subs = false;
+  params.use_multi_threading_pubs = false;
+#endif
   sys = std::make_shared<VioManager>(params);
 #if ROS_AVAILABLE == 1
   viz = std::make_shared<ROS1Visualizer>(nh, sys);
@@ -95,7 +109,16 @@ int main(int argc, char **argv) {
   // Ensure we read in all parameters required
   if (!parser->successful()) {
     PRINT_ERROR(RED "unable to parse all parameters, please fix\n" RESET);
+#if ROS_AVAILABLE == 2
+    viz.reset();
+    sys.reset();
+    parser.reset();
+    node.reset();
+    rclcpp::shutdown();
+    return EXIT_FAILURE;
+#else
     std::exit(EXIT_FAILURE);
+#endif
   }
 
   // Spin off to ROS
@@ -107,7 +130,8 @@ int main(int argc, char **argv) {
   ros::waitForShutdown();
 #elif ROS_AVAILABLE == 2
   // rclcpp::spin(node);
-  rclcpp::executors::MultiThreadedExecutor executor;
+  // Camera updates run inline by default, so keep ROS callbacks on one executor thread.
+  rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
   executor.spin();
   viz->stop_threads();
@@ -118,10 +142,10 @@ int main(int argc, char **argv) {
 #if ROS_AVAILABLE == 1
   ros::shutdown();
 #elif ROS_AVAILABLE == 2
-  // Destroy ROS publishers while the node/context are still owned by main.
+  executor.remove_node(node);
   viz.reset();
   sys.reset();
-  executor.remove_node(node);
+  parser.reset();
   node.reset();
   rclcpp::shutdown();
 #endif

@@ -58,7 +58,7 @@ void VioManager::initialize_with_gt(Eigen::Matrix<double, 17, 1> imustate) {
   ++init_generation;
   last_visual_update_imu_time = -1.0;
   propagator->invalidate_cache();
-  is_initialized_vio = true;
+  is_initialized_vio.store(true, std::memory_order_release);
 
   // Cleanup any features older then the initialization time
   trackFEATS->get_feature_database()->cleanup_measurements(state->_timestamp);
@@ -405,7 +405,7 @@ cv::Mat VioManager::get_historical_viz_image() {
 
   // Text we will overlay if needed
   std::string overlay = (did_zupt_update) ? "zvupt" : "";
-  overlay = (!is_initialized_vio) ? "init" : overlay;
+  overlay = (!is_initialized_vio.load(std::memory_order_acquire)) ? "init" : overlay;
 
   // Get the current active tracks
   cv::Mat img_history;
